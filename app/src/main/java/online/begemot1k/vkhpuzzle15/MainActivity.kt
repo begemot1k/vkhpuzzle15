@@ -7,16 +7,18 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.os.Bundle
-import android.os.VibrationEffect
-import android.os.VibratorManager
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import online.begemot1k.vkhpuzzle15.Util.Companion.vibrate
 import online.begemot1k.vkhpuzzle15.databinding.ActivityMainBinding
+import java.util.*
 import kotlin.math.min
 
 
@@ -30,6 +32,11 @@ class MainActivity : AppCompatActivity() {
     lateinit var preferences: SharedPreferences
     val preferenceTable = "vkhPuzzle15"
     val preferencePlates = "plates"
+    val preferenceRecordTime = "recordTime"
+    var gameActive: Boolean = false
+    var recordTime: Long = 0
+    var startTime: Long = 0
+    var timer = Timer()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +55,7 @@ class MainActivity : AppCompatActivity() {
             for (colIndex in 0..3) {
                 var btn = ImageView(this)
                 btn.layoutParams = LinearLayout.LayoutParams(buttonSize, buttonSize)
+                btn.setPadding(2, 2, 2, 2)
                 btn.id = rowIndex * 4 + colIndex
                 btn.tag = rowIndex * 4 + colIndex
                 btn.setBackgroundColor(Color.rgb(240, 240, 240))
@@ -60,6 +68,18 @@ class MainActivity : AppCompatActivity() {
             }
             linearLayout.addView(row)
         }
+        val statusRow = LinearLayout(this)
+        statusRow.orientation = LinearLayout.VERTICAL
+        val tvRecord = TextView(this)
+        tvRecord.layoutParams = ViewGroup.LayoutParams(metrics.bounds.width(), 60)
+        tvRecord.id = 97
+        statusRow.addView(tvRecord)
+        val tvGameActive = TextView(this)
+        tvGameActive.layoutParams = ViewGroup.LayoutParams(metrics.bounds.width(), 60)
+        tvGameActive.id = 98
+        statusRow.addView(tvGameActive)
+        linearLayout.addView(statusRow)
+
         setContentView(binding.root)
         binding.rootLayout.addView(linearLayout)
         binding.btnShuffle.setOnClickListener {
@@ -81,10 +101,10 @@ class MainActivity : AppCompatActivity() {
 
     fun init() {
         preferences = getSharedPreferences(preferenceTable, Context.MODE_PRIVATE)
+        recordTime = preferences.getLong(preferenceRecordTime, 0)
         decodePlates(
             preferences.getString(
-                preferencePlates,
-                arrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0).contentToString()
+                preferencePlates, arrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0).contentToString()
             )!!
         )
         bitmap = BitmapFactory.decodeResource(resources, R.drawable.rockplate)
@@ -101,9 +121,11 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 // no exit
-                vibrate()
+                vibrate(binding.root.context)
             }
         })
+        updateRecord()
+        updateStatus("Игра остановлена. Нажмите перемешать для старта")
     }
 
     fun encodePlates(): String {
@@ -114,7 +136,7 @@ class MainActivity : AppCompatActivity() {
         if (s.matches("""[0-9\,]+""".toRegex())) {
             var oldPlates = plates
             var zeroIndex = 15
-            val s1 = s.replace(" ", "").replace("[", "").replace("]", "")
+            val s1 = s
             var n = 0
             for (arr in s1.split(",")) {
                 plates[n] = arr.trim().toInt()
@@ -134,6 +156,7 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
         val editor = preferences.edit()
         editor?.putString(preferencePlates, encodePlates())
+        editor?.putLong(preferenceRecordTime, recordTime)
         editor?.apply()
     }
 
@@ -165,16 +188,6 @@ class MainActivity : AppCompatActivity() {
         return result
     }
 
-    fun vibrate(heavy: Boolean = false) {
-        val vibratorManager = binding.root.context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-        val vibrator = vibratorManager.defaultVibrator
-        if (heavy) {
-            vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
-        } else {
-            vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
-        }
-    }
-
     fun drawPlates() {
         for (i in 0..15) {
             val btn = binding.root.findViewById<ImageView>(i)
@@ -189,7 +202,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun movePlates(plateIndexndex: Int) {
-//        val plateIndexndex = view.tag as Int
         val plateRow = plateIndexndex.div(4)
         val plateColumn = plateIndexndex.mod(4)
 
@@ -227,7 +239,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             else -> {
-                vibrate(true)
+                vibrate(this, true)
                 Toast.makeText(this, "нажмите на ряд или колонку с пустой фишкой", Toast.LENGTH_SHORT).show()
             }
         }
@@ -272,16 +284,66 @@ class MainActivity : AppCompatActivity() {
             solvable = isSolvable()
             tries++;
         }
+        startTime = System.currentTimeMillis()
+        gameActive = true
+        timer = Timer()
+        timer.scheduleAtFixedRate(object : TimerTask() {
+            override fun run() {
+                updateTimer()
+            }
+        }, 0, 1000)
+    }
+
+    fun updateTimer() {
+        runOnUiThread {
+            if (startTime.equals(0).not()) {
+                if (gameActive) {
+                    updateStatus("Игра: ${Util.time2string(System.currentTimeMillis() - startTime)}")
+                }
+            }
+        }
+    }
+
+    fun updateRecord() {
+        val tvR = findViewById<TextView>(97)
+        if (tvR != null) {
+            tvR.text = "Рекорд: ${Util.time2string(recordTime)}"
+        }
+    }
+
+    fun updateStatus(status: String) {
+        val tv = findViewById<TextView>(98)
+        if (tv != null) {
+            tv.text = status
+        }
+
     }
 
     fun checkWin() {
-        for (i in 0..14) {
-            if (plates[i] != i + 1) return
+        if (gameActive) {
+            for (i in 0..14) {
+                if (plates[i] != i + 1) return
+            }
+            val time = System.currentTimeMillis() - startTime
+            var isNewRecord = recordTime.equals(0) || time < recordTime
+            if (isNewRecord) {
+                recordTime = time
+            }
+            startTime = 0
+            gameActive = false
+            timer.cancel()
+            updateRecord()
+            updateStatus("Игра остановлена. Нажмите перемешать для старта")
+
+            val builder = AlertDialog.Builder(this)
+            builder.setTitle("Победа!")
+            if (isNewRecord) {
+                builder.setMessage("Пятнашки полностью собраны с новым рекордом ${Util.time2string(recordTime)}!")
+            } else {
+                builder.setMessage("Пятнашки полностью собраны!\nВремя: ${Util.time2string(time)}")
+            }
+            builder.setPositiveButton("Ура!") { _, _ -> run {} }
+            builder.show()
         }
-        val builder = AlertDialog.Builder(this)
-        builder.setTitle("Победа!")
-        builder.setMessage("Пятнашки полностью собраны!")
-        builder.setPositiveButton("Ура!") { _, _ -> run {} }
-        builder.show()
     }
 }

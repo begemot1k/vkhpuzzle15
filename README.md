@@ -14,6 +14,8 @@ so, there it is
 
 run app
 
+to shuffle plates tap "ПЕРЕМЕШАТЬ"
+
 tap on numbers to shift row or column to free space, objective is place all numbers in order
 
 to exit press home button or gesture
